@@ -9,7 +9,7 @@ from atproto import Client
 
 from congress_tracker.config import get_config
 from congress_tracker.models.database import (
-    get_session, Vote, Bill, DailyDigest, VoteResult
+    get_session, Vote, Bill, FloorSpeech, DailyDigest, VoteResult
 )
 
 log = structlog.get_logger()
@@ -45,11 +45,33 @@ def format_bill(bill: Bill) -> str:
     """Format a single bill for Bluesky."""
     bill_id = f"{bill.bill_type.upper()}{bill.bill_number}"
     title = bill.title or "Untitled bill"
-    action = bill.latest_action_text or ""
 
-    text = f"{bill_id}: {title}"
-    if action:
-        text += f"\nAction: {action}"
+    # Prefer AI summary if available
+    if bill.ai_summary:
+        text = f"{bill_id}: {bill.ai_summary}"
+    else:
+        action = bill.latest_action_text or ""
+        text = f"{bill_id}: {title}"
+        if action:
+            text += f"\nAction: {action}"
+
+    return truncate(text)
+
+
+def format_speech(speech: FloorSpeech) -> str:
+    """Format a single speech for Bluesky."""
+    speaker = speech.speaker_name or "Unknown"
+
+    # Use AI summary if available, otherwise truncate content
+    if speech.ai_summary:
+        text = f"{speaker}: {speech.ai_summary}"
+    elif speech.title:
+        text = f"{speaker} on {speech.title}"
+    else:
+        # Extract first sentence of content
+        content = speech.content or ""
+        first_sentence = content.split('.')[0][:150] if content else ""
+        text = f"{speaker}: {first_sentence}..."
 
     return truncate(text)
 
@@ -69,7 +91,12 @@ def generate_daily_digest(target_date: date) -> list[str]:
         # Get bills updated on the date
         bills = session.query(Bill).filter(Bill.latest_action_date == target_date).all()
 
-        if not votes and not bills:
+        # Get speeches for the date
+        speeches = session.query(FloorSpeech).filter(
+            FloorSpeech.speech_date == target_date
+        ).all()
+
+        if not votes and not bills and not speeches:
             log.info("No activity for digest", date=str(target_date))
             return []
 
@@ -77,7 +104,8 @@ def generate_daily_digest(target_date: date) -> list[str]:
         date_str = target_date.strftime("%B %d, %Y")
         header = f"Congressional Activity - {date_str}\n\n"
         header += f"Votes: {len(votes)}\n"
-        header += f"Bills with action: {len(bills)}"
+        header += f"Bills: {len(bills)}\n"
+        header += f"Speeches: {len(speeches)}"
         posts.append(truncate(header))
 
         # Vote summaries (limit to top 5)
@@ -101,10 +129,20 @@ def generate_daily_digest(target_date: date) -> list[str]:
             if len(bills) > 5:
                 posts.append(f"...and {len(bills) - 5} more bills")
 
+        # Speech summaries (limit to top 3 - they're longer)
+        if speeches:
+            posts.append(truncate(f"FLOOR SPEECHES ({len(speeches)} total):"))
+            for speech in speeches[:3]:
+                posts.append(format_speech(speech))
+
+            if len(speeches) > 3:
+                posts.append(f"...and {len(speeches) - 3} more speeches")
+
         # Footer
         posts.append("Data from Congress.gov API")
 
-        log.info("Generated digest", date=str(target_date), posts=len(posts))
+        log.info("Generated digest", date=str(target_date), posts=len(posts),
+                 votes=len(votes), bills=len(bills), speeches=len(speeches))
         return posts
 
     except Exception as e:
@@ -168,8 +206,9 @@ def publish_thread(posts: list[str], target_date: date) -> Optional[str]:
             digest = DailyDigest(
                 digest_date=target_date,
                 thread_content=json.dumps(posts),
-                votes_count=0,  # Could track this
-                bills_count=0,
+                votes_count=len([p for p in posts if "VOTES" in p]),
+                bills_count=len([p for p in posts if "BILLS" in p]),
+                speeches_count=len([p for p in posts if "SPEECHES" in p]),
                 published=True,
                 published_at=datetime.utcnow(),
                 bluesky_thread_uri=root_uri,

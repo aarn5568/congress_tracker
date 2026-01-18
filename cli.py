@@ -92,10 +92,12 @@ def fetch_speeches(target_date):
 @cli.command()
 @click.option("--date", "-d", "target_date", type=click.DateTime(formats=["%Y-%m-%d"]),
               help="Date to run full ETL for (YYYY-MM-DD). Defaults to yesterday.")
-def run_etl(target_date):
-    """Run full ETL pipeline: fetch votes and bills."""
+@click.option("--skip-speeches", is_flag=True, help="Skip speech extraction (faster).")
+def run_etl(target_date, skip_speeches):
+    """Run full ETL pipeline: fetch votes, bills, and speeches."""
     from congress_tracker.etl.votes import fetch_votes_for_date
     from congress_tracker.etl.bills import fetch_bills_for_date
+    from congress_tracker.etl.speeches import fetch_speeches_for_date
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -113,6 +115,14 @@ def run_etl(target_date):
     click.echo("Fetching bills...")
     bill_count = fetch_bills_for_date(target)
     click.echo(f"  Saved {bill_count} bills.")
+
+    # Speeches
+    if not skip_speeches:
+        click.echo("Fetching speeches (this may take a moment)...")
+        speech_count = fetch_speeches_for_date(target)
+        click.echo(f"  Saved {speech_count} speeches.")
+    else:
+        click.echo("Skipping speeches.")
 
     click.echo("ETL complete.")
 
@@ -189,6 +199,81 @@ def show_stats():
         click.echo(f"  Bills:    {bill_count}")
         click.echo(f"  Speeches: {speech_count}")
         click.echo(f"  Digests:  {digest_count}")
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option("--date", "-d", "target_date", type=click.DateTime(formats=["%Y-%m-%d"]),
+              help="Date to summarize content for (YYYY-MM-DD). Defaults to yesterday.")
+@click.option("--speeches-only", is_flag=True, help="Only summarize speeches.")
+@click.option("--bills-only", is_flag=True, help="Only summarize bills.")
+def summarize(target_date, speeches_only, bills_only):
+    """Generate AI summaries for speeches and bills using Claude Haiku."""
+    from congress_tracker.models.database import get_session, Bill, FloorSpeech
+    from congress_tracker.summarizers.haiku import get_summarizer
+    from datetime import datetime
+
+    if target_date is None:
+        target = date.today() - timedelta(days=1)
+    else:
+        target = target_date.date()
+
+    summarizer = get_summarizer()
+    if not summarizer:
+        click.echo("Error: Anthropic API key not configured in .env")
+        return
+
+    session = get_session()
+    summary_count = 0
+
+    try:
+        # Summarize speeches
+        if not bills_only:
+            speeches = session.query(FloorSpeech).filter(
+                FloorSpeech.speech_date == target,
+                FloorSpeech.ai_summary.is_(None)
+            ).all()
+
+            click.echo(f"Summarizing {len(speeches)} speeches...")
+            for speech in speeches:
+                summary = summarizer.summarize_speech(
+                    speaker=speech.speaker_name,
+                    title=speech.title,
+                    content=speech.content or ""
+                )
+                if summary:
+                    speech.ai_summary = summary
+                    speech.ai_summary_date = datetime.utcnow()
+                    summary_count += 1
+                    click.echo(f"  {speech.speaker_name}: {summary[:60]}...")
+
+        # Summarize bills without CRS summaries
+        if not speeches_only:
+            bills = session.query(Bill).filter(
+                Bill.latest_action_date == target,
+                Bill.crs_summary.is_(None),
+                Bill.ai_summary.is_(None)
+            ).all()
+
+            click.echo(f"Summarizing {len(bills)} bills...")
+            for bill in bills:
+                summary = summarizer.summarize_bill(
+                    title=bill.title or "",
+                    latest_action=bill.latest_action_text
+                )
+                if summary:
+                    bill.ai_summary = summary
+                    bill.ai_summary_date = datetime.utcnow()
+                    summary_count += 1
+                    click.echo(f"  {bill.bill_type.upper()}{bill.bill_number}: {summary[:60]}...")
+
+        session.commit()
+        click.echo(f"Generated {summary_count} summaries.")
+
+    except Exception as e:
+        session.rollback()
+        click.echo(f"Error: {e}")
     finally:
         session.close()
 

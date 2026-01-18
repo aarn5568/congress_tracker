@@ -5,6 +5,7 @@ from congress_tracker.formatters.bluesky import (
     publish_thread,
     format_vote,
     format_bill,
+    format_speech,
 )
 
 __all__ = [
@@ -12,4 +13,5 @@ __all__ = [
     "publish_thread",
     "format_vote",
     "format_bill",
+    "format_speech",
 ]
