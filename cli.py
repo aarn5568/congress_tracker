@@ -183,6 +183,64 @@ def publish_digest(target_date, dry_run):
 
 
 @cli.command()
+@click.option("--date", "-d", "target_date", type=click.DateTime(formats=["%Y-%m-%d"]),
+              help="Date to publish items for (YYYY-MM-DD). Defaults to yesterday.")
+@click.option("--dry-run", is_flag=True, help="Show what would be posted without publishing.")
+@click.option("--max-items", "-m", type=int, help="Maximum number of items to post.")
+def publish_items(target_date, dry_run, max_items):
+    """Publish individual posts for each bill, vote, and speech from a date."""
+    from congress_tracker.formatters.bluesky import publish_daily_items
+    from congress_tracker.models.database import get_session, Vote, Bill, FloorSpeech
+
+    if target_date is None:
+        target = date.today() - timedelta(days=1)
+    else:
+        target = target_date.date()
+
+    click.echo(f"{'[DRY RUN] ' if dry_run else ''}Publishing individual items for {target}...")
+
+    if dry_run:
+        # Show what would be posted
+        session = get_session()
+        try:
+            votes = session.query(Vote).filter(
+                Vote.vote_date == target,
+                Vote.posted.is_(False)
+            ).all()
+            bills = session.query(Bill).filter(
+                Bill.latest_action_date == target,
+                Bill.posted.is_(False)
+            ).all()
+            speeches = session.query(FloorSpeech).filter(
+                FloorSpeech.speech_date == target,
+                FloorSpeech.posted.is_(False)
+            ).all()
+
+            total = len(votes) + len(bills) + len(speeches)
+            if max_items and total > max_items:
+                click.echo(f"Would post {max_items} of {total} items:")
+            else:
+                click.echo(f"Would post {total} items:")
+
+            click.echo(f"  Votes: {len(votes)}")
+            click.echo(f"  Bills: {len(bills)}")
+            click.echo(f"  Speeches: {len(speeches)}")
+
+            if not total:
+                click.echo("No unposted items found.")
+        finally:
+            session.close()
+    else:
+        stats = publish_daily_items(target, max_items=max_items)
+        click.echo(f"\nPublished:")
+        click.echo(f"  Votes: {stats['votes']}")
+        click.echo(f"  Bills: {stats['bills']}")
+        click.echo(f"  Speeches: {stats['speeches']}")
+        if stats['errors']:
+            click.echo(f"  Errors: {stats['errors']}")
+
+
+@cli.command()
 def show_stats():
     """Show database statistics."""
     from congress_tracker.models.database import get_session, Vote, Bill, FloorSpeech, DailyDigest
