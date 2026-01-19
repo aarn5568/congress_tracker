@@ -125,14 +125,14 @@ class CongressionalRecordFetcher:
         if not self.config.congress_api_key:
             raise ValueError("Congress.gov API key not configured")
 
-        year = target_date.year
-        month = target_date.month
-        day = target_date.day
-
-        url = f"{self.config.congress_api_base}/congressional-record/{year}/{month}/{day}"
+        # Use query parameters for date filtering (not URL path)
+        url = f"{self.config.congress_api_base}/congressional-record"
         params = {
             "api_key": self.config.congress_api_key,
             "format": "json",
+            "y": target_date.year,
+            "m": target_date.month,
+            "d": target_date.day,
         }
 
         log.info("Fetching Congressional Record metadata", date=str(target_date))
@@ -143,7 +143,15 @@ class CongressionalRecordFetcher:
             return None
 
         response.raise_for_status()
-        return response.json()
+        data = response.json()
+
+        # Check if any issues were returned for this date
+        issues = data.get("Results", {}).get("Issues", [])
+        if not issues:
+            log.info("No Congressional Record for date", date=str(target_date))
+            return None
+
+        return data
 
     def _get_pdf_urls(self, record_data: dict) -> dict[str, str]:
         """Extract PDF URLs from Congressional Record metadata."""
