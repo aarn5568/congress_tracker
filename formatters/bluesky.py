@@ -152,6 +152,232 @@ def generate_daily_digest(target_date: date) -> list[str]:
         session.close()
 
 
+def publish_vote(vote: Vote) -> Optional[str]:
+    """Publish a single vote as an individual post to Bluesky.
+
+    Args:
+        vote: Vote object to publish
+
+    Returns:
+        URI of the post, or None on failure
+    """
+    config = get_config()
+
+    if not config.bluesky_handle or not config.bluesky_password:
+        log.error("Bluesky credentials not configured")
+        return None
+
+    try:
+        # Format the vote text
+        vote_text = format_vote(vote)
+        if vote.yea_count and vote.nay_count:
+            vote_text += f"\nYea: {vote.yea_count} / Nay: {vote.nay_count}"
+
+        # Add date
+        date_str = vote.vote_date.strftime("%B %d, %Y")
+        vote_text = f"Vote - {date_str}\n\n{vote_text}"
+
+        # Publish to Bluesky
+        client = Client()
+        client.login(config.bluesky_handle, config.bluesky_password)
+        response = client.send_post(text=truncate(vote_text))
+
+        # Update vote record
+        session = get_session()
+        try:
+            vote.bluesky_post_uri = response.uri
+            vote.posted = True
+            vote.posted_at = datetime.utcnow()
+            session.add(vote)
+            session.commit()
+        finally:
+            session.close()
+
+        log.info("Published vote", uri=response.uri, vote_id=vote.id)
+        return response.uri
+
+    except Exception as e:
+        log.error("Failed to publish vote", error=str(e), vote_id=vote.id)
+        return None
+
+
+def publish_bill(bill: Bill) -> Optional[str]:
+    """Publish a single bill as an individual post to Bluesky.
+
+    Args:
+        bill: Bill object to publish
+
+    Returns:
+        URI of the post, or None on failure
+    """
+    config = get_config()
+
+    if not config.bluesky_handle or not config.bluesky_password:
+        log.error("Bluesky credentials not configured")
+        return None
+
+    try:
+        # Format the bill text
+        bill_text = format_bill(bill)
+
+        # Add date and type header
+        date_str = bill.latest_action_date.strftime("%B %d, %Y") if bill.latest_action_date else "Unknown"
+        bill_text = f"Bill Update - {date_str}\n\n{bill_text}"
+
+        # Publish to Bluesky
+        client = Client()
+        client.login(config.bluesky_handle, config.bluesky_password)
+        response = client.send_post(text=truncate(bill_text))
+
+        # Update bill record
+        session = get_session()
+        try:
+            bill.bluesky_post_uri = response.uri
+            bill.posted = True
+            bill.posted_at = datetime.utcnow()
+            session.add(bill)
+            session.commit()
+        finally:
+            session.close()
+
+        log.info("Published bill", uri=response.uri, bill_id=bill.id)
+        return response.uri
+
+    except Exception as e:
+        log.error("Failed to publish bill", error=str(e), bill_id=bill.id)
+        return None
+
+
+def publish_speech(speech: FloorSpeech) -> Optional[str]:
+    """Publish a single floor speech as an individual post to Bluesky.
+
+    Args:
+        speech: FloorSpeech object to publish
+
+    Returns:
+        URI of the post, or None on failure
+    """
+    config = get_config()
+
+    if not config.bluesky_handle or not config.bluesky_password:
+        log.error("Bluesky credentials not configured")
+        return None
+
+    try:
+        # Format the speech text
+        speech_text = format_speech(speech)
+
+        # Add date and type header
+        date_str = speech.speech_date.strftime("%B %d, %Y")
+        speech_text = f"Floor Speech - {date_str}\n\n{speech_text}"
+
+        # Publish to Bluesky
+        client = Client()
+        client.login(config.bluesky_handle, config.bluesky_password)
+        response = client.send_post(text=truncate(speech_text))
+
+        # Update speech record
+        session = get_session()
+        try:
+            speech.bluesky_post_uri = response.uri
+            speech.posted = True
+            speech.posted_at = datetime.utcnow()
+            session.add(speech)
+            session.commit()
+        finally:
+            session.close()
+
+        log.info("Published speech", uri=response.uri, speech_id=speech.id)
+        return response.uri
+
+    except Exception as e:
+        log.error("Failed to publish speech", error=str(e), speech_id=speech.id)
+        return None
+
+
+def publish_daily_items(target_date: date, max_items: Optional[int] = None) -> dict:
+    """Publish all unposted items from a date as individual posts.
+
+    Args:
+        target_date: Date to publish items for
+        max_items: Optional limit on total items to post
+
+    Returns:
+        Dictionary with counts of published items
+    """
+    session = get_session()
+    stats = {
+        "votes": 0,
+        "bills": 0,
+        "speeches": 0,
+        "errors": 0,
+    }
+
+    try:
+        # Get unposted votes
+        votes = session.query(Vote).filter(
+            Vote.vote_date == target_date,
+            Vote.posted.is_(False)
+        ).all()
+
+        # Get unposted bills
+        bills = session.query(Bill).filter(
+            Bill.latest_action_date == target_date,
+            Bill.posted.is_(False)
+        ).all()
+
+        # Get unposted speeches
+        speeches = session.query(FloorSpeech).filter(
+            FloorSpeech.speech_date == target_date,
+            FloorSpeech.posted.is_(False)
+        ).all()
+
+        total_items = len(votes) + len(bills) + len(speeches)
+        if total_items == 0:
+            log.info("No unposted items for date", date=str(target_date))
+            return stats
+
+        log.info("Publishing individual items", date=str(target_date),
+                 votes=len(votes), bills=len(bills), speeches=len(speeches))
+
+        # Apply max_items limit if specified
+        items_to_post = []
+        items_to_post.extend([("vote", v) for v in votes])
+        items_to_post.extend([("bill", b) for b in bills])
+        items_to_post.extend([("speech", s) for s in speeches])
+
+        if max_items:
+            items_to_post = items_to_post[:max_items]
+
+        # Publish each item
+        for item_type, item in items_to_post:
+            try:
+                if item_type == "vote":
+                    if publish_vote(item):
+                        stats["votes"] += 1
+                    else:
+                        stats["errors"] += 1
+                elif item_type == "bill":
+                    if publish_bill(item):
+                        stats["bills"] += 1
+                    else:
+                        stats["errors"] += 1
+                elif item_type == "speech":
+                    if publish_speech(item):
+                        stats["speeches"] += 1
+                    else:
+                        stats["errors"] += 1
+            except Exception as e:
+                log.error("Error publishing item", error=str(e), type=item_type)
+                stats["errors"] += 1
+
+        log.info("Publishing complete", **stats)
+        return stats
+
+    finally:
+        session.close()
+
+
 def publish_thread(posts: list[str], target_date: date) -> Optional[str]:
     """Publish a thread to Bluesky.
 

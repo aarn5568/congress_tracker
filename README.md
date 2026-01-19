@@ -7,7 +7,8 @@ A Python tool that fetches Congressional activity (votes, bills) from Congress.g
 - **Vote Tracking**: Fetches House roll call votes from Congress.gov API
 - **Bill Tracking**: Monitors bill updates and latest actions
 - **AI Summarization**: Uses Claude Haiku to summarize bills without CRS summaries
-- **Bluesky Integration**: Generates and publishes threaded digests (300 char limit)
+- **Bluesky Integration**: Publish as threaded digests OR individual posts per item
+- **Individual Posts**: Each bill, vote, and speech can be posted separately (NEW!)
 - **SQLite Storage**: Local database for historical tracking
 - **Cron Ready**: Designed to run as a daily scheduled job
 
@@ -74,6 +75,15 @@ python -m congress_tracker.cli publish-digest --date 2025-09-08
 
 # Dry run (preview without publishing)
 python -m congress_tracker.cli publish-digest --date 2025-09-08 --dry-run
+
+# Publish individual posts (NEW! - separate post for each item)
+python -m congress_tracker.cli publish-items --date 2025-09-08
+
+# Publish individual posts with limit
+python -m congress_tracker.cli publish-items --date 2025-09-08 --max-items 10
+
+# Preview individual posts
+python -m congress_tracker.cli publish-items --date 2025-09-08 --dry-run
 
 # Show database statistics
 python -m congress_tracker.cli show-stats

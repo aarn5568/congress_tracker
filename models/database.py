@@ -63,6 +63,11 @@ class Vote(Base):
     included_in_digest = Column(Boolean, default=False)
     digest_date = Column(Date)
 
+    # Individual post tracking
+    bluesky_post_uri = Column(String(500))
+    posted = Column(Boolean, default=False)
+    posted_at = Column(DateTime)
+
 
 class Bill(Base):
     """Congressional bill record."""
@@ -100,6 +105,11 @@ class Bill(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Individual post tracking
+    bluesky_post_uri = Column(String(500))
+    posted = Column(Boolean, default=False)
+    posted_at = Column(DateTime)
+
 
 class FloorSpeech(Base):
     """Congressional Record floor speech."""
@@ -125,6 +135,11 @@ class FloorSpeech(Base):
     source_url = Column(String(500))
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Individual post tracking
+    bluesky_post_uri = Column(String(500))
+    posted = Column(Boolean, default=False)
+    posted_at = Column(DateTime)
 
 
 class DailyDigest(Base):
