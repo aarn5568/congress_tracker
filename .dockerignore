@@ -1,0 +1,50 @@
+# Git
+.git
+.gitignore
+.github
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+dist
+build
+venv
+.venv
+env
+ENV
+
+# IDEs
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Data and logs (mounted as volumes)
+data/
+logs/
+*.db
+*.log
+
+# Environment
+.env.example
+.env.local
+
+# Documentation
+README.md
+docs/
+
+# Scripts (not needed in container)
+scripts/*.sh
+cron_job.sh
+
+# Docker
+.dockerignore
+Dockerfile
+docker-compose*.yml

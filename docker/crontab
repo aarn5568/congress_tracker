@@ -1,0 +1,22 @@
+# Congress Tracker - Docker Cron Schedule
+# Times are in the timezone set by TZ environment variable
+
+# 10:30 AM - Fetch daily data
+30 10 * * * cd /app && python -m congress_tracker.cli run-etl >> /logs/fetch.log 2>&1
+
+# 11:00 AM - Post morning batch (10 items, votes priority)
+0 11 * * * cd /app && python -m congress_tracker.cli publish-items --max-items 10 >> /logs/post_morning.log 2>&1
+
+# 1:00 PM - Post afternoon batch (15 items)
+0 13 * * * cd /app && python -m congress_tracker.cli publish-items --max-items 15 >> /logs/post_afternoon.log 2>&1
+
+# 3:00 PM - Post mid-afternoon batch (15 items)
+0 15 * * * cd /app && python -m congress_tracker.cli publish-items --max-items 15 >> /logs/post_midafternoon.log 2>&1
+
+# 5:00 PM - Post evening batch (10 items, speeches)
+0 17 * * * cd /app && python -m congress_tracker.cli publish-items --max-items 10 >> /logs/post_evening.log 2>&1
+
+# 7:00 PM - Post catch-all batch (20 items, any remaining)
+0 19 * * * cd /app && python -m congress_tracker.cli publish-items --max-items 20 >> /logs/post_catchall.log 2>&1
+
+# Empty line required at end of cron file
