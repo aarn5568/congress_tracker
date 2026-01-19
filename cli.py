@@ -93,11 +93,13 @@ def fetch_speeches(target_date):
 @click.option("--date", "-d", "target_date", type=click.DateTime(formats=["%Y-%m-%d"]),
               help="Date to run full ETL for (YYYY-MM-DD). Defaults to yesterday.")
 @click.option("--skip-speeches", is_flag=True, help="Skip speech extraction (faster).")
-def run_etl(target_date, skip_speeches):
+@click.option("--notify/--no-notify", default=True, help="Send Discord notification.")
+def run_etl(target_date, skip_speeches, notify):
     """Run full ETL pipeline: fetch votes, bills, and speeches."""
     from etl.votes import fetch_votes_for_date
     from etl.bills import fetch_bills_for_date
     from etl.speeches import fetch_speeches_for_date
+    from notifications import get_notifier
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -106,25 +108,39 @@ def run_etl(target_date, skip_speeches):
 
     click.echo(f"Running ETL for {target}...")
 
-    # Votes
-    click.echo("Fetching votes...")
-    vote_count = fetch_votes_for_date(target)
-    click.echo(f"  Saved {vote_count} votes.")
+    try:
+        # Votes
+        click.echo("Fetching votes...")
+        vote_count = fetch_votes_for_date(target)
+        click.echo(f"  Saved {vote_count} votes.")
 
-    # Bills
-    click.echo("Fetching bills...")
-    bill_count = fetch_bills_for_date(target)
-    click.echo(f"  Saved {bill_count} bills.")
+        # Bills
+        click.echo("Fetching bills...")
+        bill_count = fetch_bills_for_date(target)
+        click.echo(f"  Saved {bill_count} bills.")
 
-    # Speeches
-    if not skip_speeches:
-        click.echo("Fetching speeches (this may take a moment)...")
-        speech_count = fetch_speeches_for_date(target)
-        click.echo(f"  Saved {speech_count} speeches.")
-    else:
-        click.echo("Skipping speeches.")
+        # Speeches
+        speech_count = 0
+        if not skip_speeches:
+            click.echo("Fetching speeches (this may take a moment)...")
+            speech_count = fetch_speeches_for_date(target)
+            click.echo(f"  Saved {speech_count} speeches.")
+        else:
+            click.echo("Skipping speeches.")
 
-    click.echo("ETL complete.")
+        click.echo("ETL complete.")
+
+        # Send Discord notification
+        if notify:
+            notifier = get_notifier()
+            notifier.notify_etl_complete(str(target), vote_count, bill_count, speech_count)
+
+    except Exception as e:
+        click.echo(f"Error: {e}")
+        if notify:
+            notifier = get_notifier()
+            notifier.notify_error("run-etl", str(e))
+        raise
 
 
 @cli.command()
@@ -247,7 +263,8 @@ def publish_items(target_date, dry_run, max_items):
               help="Date to publish bill threads for (YYYY-MM-DD). Defaults to yesterday.")
 @click.option("--dry-run", is_flag=True, help="Preview threads without publishing.")
 @click.option("--max-bills", "-m", type=int, help="Maximum number of bills to publish.")
-def publish_bill_threads(target_date, dry_run, max_bills):
+@click.option("--notify/--no-notify", default=True, help="Send Discord notification.")
+def publish_bill_threads(target_date, dry_run, max_bills, notify):
     """Publish bills as threaded posts with votes and speeches.
 
     Each bill becomes a thread:
@@ -257,6 +274,7 @@ def publish_bill_threads(target_date, dry_run, max_bills):
     """
     from formatters.bluesky import publish_bill_threads as _publish_bill_threads
     from models.database import get_session, Bill, Vote, FloorSpeech
+    from notifications import get_notifier
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -320,18 +338,31 @@ def publish_bill_threads(target_date, dry_run, max_bills):
         finally:
             session.close()
     else:
-        stats = _publish_bill_threads(target, max_bills=max_bills, dry_run=False)
-        click.echo(f"\nPublished:")
-        click.echo(f"  Bill threads: {stats['bills']}")
-        click.echo(f"  Total votes included: {stats['total_votes']}")
-        click.echo(f"  Total speeches included: {stats['total_speeches']}")
-        if stats['errors']:
-            click.echo(f"  Errors: {stats['errors']}")
+        try:
+            stats = _publish_bill_threads(target, max_bills=max_bills, dry_run=False)
+            click.echo(f"\nPublished:")
+            click.echo(f"  Bill threads: {stats['bills']}")
+            click.echo(f"  Total votes included: {stats['total_votes']}")
+            click.echo(f"  Total speeches included: {stats['total_speeches']}")
+            if stats['errors']:
+                click.echo(f"  Errors: {stats['errors']}")
 
-        if stats['threads']:
-            click.echo(f"\nThreads:")
-            for thread in stats['threads']:
-                click.echo(f"  {thread['bill_id']}: {thread['total_posts']} posts")
+            if stats['threads']:
+                click.echo(f"\nThreads:")
+                for thread in stats['threads']:
+                    click.echo(f"  {thread['bill_id']}: {thread['total_posts']} posts")
+
+            # Send Discord notification
+            if notify:
+                notifier = get_notifier()
+                notifier.notify_publish_complete(str(target), stats)
+
+        except Exception as e:
+            click.echo(f"Error: {e}")
+            if notify:
+                notifier = get_notifier()
+                notifier.notify_error("publish-bill-threads", str(e))
+            raise
 
 
 @cli.command()
@@ -367,10 +398,12 @@ def show_stats():
               help="Date to summarize content for (YYYY-MM-DD). Defaults to yesterday.")
 @click.option("--speeches-only", is_flag=True, help="Only summarize speeches.")
 @click.option("--bills-only", is_flag=True, help="Only summarize bills.")
-def summarize(target_date, speeches_only, bills_only):
+@click.option("--notify/--no-notify", default=True, help="Send Discord notification.")
+def summarize(target_date, speeches_only, bills_only, notify):
     """Generate AI summaries for speeches and bills using Claude Haiku."""
     from models.database import get_session, Bill, FloorSpeech
     from summarizers.haiku import get_summarizer
+    from notifications import get_notifier
     from datetime import datetime
 
     if target_date is None:
@@ -381,6 +414,9 @@ def summarize(target_date, speeches_only, bills_only):
     summarizer = get_summarizer()
     if not summarizer:
         click.echo("Error: Anthropic API key not configured in .env")
+        if notify:
+            notifier = get_notifier()
+            notifier.notify_error("summarize", "Anthropic API key not configured")
         return
 
     session = get_session()
@@ -430,9 +466,17 @@ def summarize(target_date, speeches_only, bills_only):
         session.commit()
         click.echo(f"Generated {summary_count} summaries.")
 
+        # Send Discord notification
+        if notify:
+            notifier = get_notifier()
+            notifier.notify_summarize_complete(str(target), summary_count)
+
     except Exception as e:
         session.rollback()
         click.echo(f"Error: {e}")
+        if notify:
+            notifier = get_notifier()
+            notifier.notify_error("summarize", str(e))
     finally:
         session.close()
 

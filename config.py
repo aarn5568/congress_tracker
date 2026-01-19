@@ -21,6 +21,9 @@ class Config(BaseModel):
     bluesky_handle: str = Field(default_factory=lambda: os.getenv("BLUESKY_HANDLE", ""))
     bluesky_password: str = Field(default_factory=lambda: os.getenv("BLUESKY_PASSWORD", ""))
 
+    # Discord notifications
+    discord_webhook_url: str = Field(default_factory=lambda: os.getenv("DISCORD_WEBHOOK_URL", ""))
+
     # Database
     database_url: str = Field(
         default_factory=lambda: os.getenv(
