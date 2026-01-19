@@ -89,13 +89,77 @@ python -m congress_tracker.cli publish-items --date 2025-09-08 --dry-run
 python -m congress_tracker.cli show-stats
 ```
 
-## Cron Setup
+## Automated Scheduling
 
-Add to crontab for daily execution at 6 AM:
+### Option 1: Optimal Staggered Schedule (Recommended)
+
+This approach fetches data once daily and spreads posts throughout the day to avoid flooding followers.
+
+**Why this schedule?**
+- Congress.gov updates at **10:00 AM ET** daily
+- Posts spread over 8 hours (11 AM - 7 PM) for optimal engagement
+- Prevents follower fatigue from too many posts at once
+
+**Timeline:**
+- **10:30 AM ET**: Fetch all data (after Congress.gov updates)
+- **11:00 AM ET**: Post batch 1 (10 items - votes priority)
+- **1:00 PM ET**: Post batch 2 (15 items)
+- **3:00 PM ET**: Post batch 3 (15 items)
+- **5:00 PM ET**: Post batch 4 (10 items - speeches)
+- **7:00 PM ET**: Post batch 5 (20 items - catch-all)
+
+**Total: Up to 70 items/day spread over 8 hours**
 
 ```bash
-crontab -e
-# Add:
+# Copy and customize the crontab template
+cp scripts/crontab.example scripts/crontab.local
+
+# Edit paths in crontab.local to match your system
+nano scripts/crontab.local
+
+# Install the crontab
+crontab scripts/crontab.local
+
+# Verify installation
+crontab -l
+```
+
+### Option 2: Single Daily Job (Simpler)
+
+If you prefer one long-running job that handles everything:
+
+```bash
+# Run once per day at 10:30 AM ET
+30 10 * * * /path/to/congress_tracker/scripts/daily_workflow.sh >> /var/log/congress_tracker.log 2>&1
+```
+
+This script fetches data and automatically posts in batches with delays between them.
+
+### Option 3: Manual Execution
+
+For testing or manual control:
+
+```bash
+# Fetch data
+./scripts/fetch_daily.sh
+
+# Post in batches throughout the day
+./scripts/post_morning.sh
+# Wait 2 hours...
+./scripts/post_afternoon.sh
+# Wait 2 hours...
+./scripts/post_midafternoon.sh
+# Wait 2 hours...
+./scripts/post_evening.sh
+# Wait 2 hours...
+./scripts/post_catchall.sh
+```
+
+### Legacy: Simple Daily Job
+
+Old approach (fetches and posts everything at once):
+
+```bash
 0 6 * * * /path/to/congress_tracker/cron_job.sh >> /var/log/congress_tracker.log 2>&1
 ```
 
@@ -103,27 +167,50 @@ crontab -e
 
 ```
 congress_tracker/
-├── cli.py              # Command-line interface
-├── config.py           # Configuration management
-├── cron_job.sh         # Cron wrapper script
+├── cli.py                    # Command-line interface
+├── config.py                 # Configuration management
+├── cron_job.sh               # Legacy cron wrapper script
+├── scripts/                  # Scheduling scripts (NEW!)
+│   ├── fetch_daily.sh        # Morning data fetch
+│   ├── post_morning.sh       # 11 AM batch
+│   ├── post_afternoon.sh     # 1 PM batch
+│   ├── post_midafternoon.sh  # 3 PM batch
+│   ├── post_evening.sh       # 5 PM batch
+│   ├── post_catchall.sh      # 7 PM batch
+│   ├── daily_workflow.sh     # All-in-one alternative
+│   └── crontab.example       # Crontab template
 ├── etl/
-│   ├── votes.py        # Vote fetching from Congress.gov
-│   ├── bills.py        # Bill fetching
-│   └── speeches.py     # Congressional Record (metadata only)
+│   ├── votes.py              # Vote fetching from Congress.gov
+│   ├── bills.py              # Bill fetching
+│   └── speeches.py           # Congressional Record (metadata only)
 ├── models/
-│   └── database.py     # SQLAlchemy models
+│   └── database.py           # SQLAlchemy models
 ├── formatters/
-│   └── bluesky.py      # Bluesky thread formatting
+│   └── bluesky.py            # Bluesky formatting & publishing
 ├── summarizers/
-│   └── haiku.py        # Claude Haiku summarization
+│   └── haiku.py              # Claude Haiku summarization
 └── utils/
 ```
+
+## Data Update Timing
+
+**Congress.gov Update Schedule:**
+- Congress.gov is updated **once per day at 10:00 AM ET**
+- Data reflects activity from the previous day's House/Senate sessions
+- Running the ETL more than once per day is unnecessary - the data won't change
+
+**Optimal Fetch Time:** 10:30 AM ET or later
+
+**Why Stagger Posts?**
+- Posting 50+ items at once can overwhelm followers
+- Spreading posts over 8 hours increases visibility and engagement
+- Allows followers in different time zones to see content
 
 ## API Limitations
 
 - **House votes only**: Congress.gov API currently only provides House roll call votes. Senate vote data is not available through this API.
 - **Congressional Record**: API provides metadata and PDF links, not extracted speech text.
-- **Rate limits**: Congress.gov has rate limits; the ETL includes retry logic with exponential backoff.
+- **Rate limits**: Congress.gov API limit is 5,000 requests/hour (you'll use ~100/day).
 
 ## Data Sources
 
