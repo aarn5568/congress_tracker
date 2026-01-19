@@ -8,8 +8,8 @@ import httpx
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from congress_tracker.config import get_config
-from congress_tracker.models.database import Vote, VoteResult, Chamber, get_session, init_db
+from config import get_config
+from models.database import Vote, VoteResult, Chamber, get_session, init_db
 
 log = structlog.get_logger()
 
@@ -119,6 +119,11 @@ class VoteFetcher:
             if vote_data.get("legislationType") and vote_data.get("legislationNumber"):
                 bill_id = f"{vote_data['legislationType']}{vote_data['legislationNumber']}"
 
+            # Extract amendment info
+            amendment_number = vote_data.get("amendmentNumber")
+            amendment_type = vote_data.get("amendmentType")
+            amendment_author = vote_data.get("amendmentAuthor")
+
             vote = Vote(
                 congress=vote_data.get("congress"),
                 session=vote_data.get("sessionNumber", 1),
@@ -131,6 +136,9 @@ class VoteFetcher:
                 result=self._parse_vote_result(vote_data.get("result", "")),
                 bill_id=bill_id,
                 bill_number=vote_data.get("legislationNumber"),
+                amendment_number=amendment_number,
+                amendment_type=amendment_type,
+                amendment_author=amendment_author,
                 source_url=vote_data.get("url"),
                 raw_data=json.dumps(vote_data),
             )

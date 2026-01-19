@@ -5,7 +5,7 @@ from typing import Optional
 import anthropic
 import structlog
 
-from congress_tracker.config import get_config
+from config import get_config
 
 log = structlog.get_logger()
 

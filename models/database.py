@@ -6,7 +6,7 @@ from sqlalchemy import create_engine, Column, Integer, String, Text, Date, DateT
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 import enum
 
-from congress_tracker.config import get_config
+from config import get_config
 
 Base = declarative_base()
 
@@ -51,6 +51,12 @@ class Vote(Base):
     # Related bill info
     bill_id = Column(String(50))
     bill_number = Column(String(20))
+    bill_title = Column(Text)  # Cached bill title for display
+
+    # Amendment info (for amendment votes)
+    amendment_number = Column(String(20))
+    amendment_type = Column(String(20))
+    amendment_author = Column(Text)  # e.g., "Huizenga of Michigan Part A Amendment"
 
     # API source tracking
     source_url = Column(String(500))
@@ -130,6 +136,10 @@ class FloorSpeech(Base):
     ai_summary = Column(Text)
     ai_summary_date = Column(DateTime)
 
+    # Related bill (detected from speech content)
+    related_bill_id = Column(String(50))  # e.g., "HR2988"
+    related_bill_db_id = Column(Integer, ForeignKey("bills.id"))
+
     # Metadata
     granule_id = Column(String(100))
     source_url = Column(String(500))
@@ -140,6 +150,30 @@ class FloorSpeech(Base):
     bluesky_post_uri = Column(String(500))
     posted = Column(Boolean, default=False)
     posted_at = Column(DateTime)
+
+
+class BillThread(Base):
+    """Published Bluesky thread for a bill."""
+
+    __tablename__ = "bill_threads"
+
+    id = Column(Integer, primary_key=True)
+    bill_id = Column(Integer, ForeignKey("bills.id"), nullable=False)
+    bill_str_id = Column(String(50), nullable=False)  # e.g., "HR2988"
+
+    # Thread structure - store URIs for threading replies
+    header_post_uri = Column(String(500))
+    header_post_cid = Column(String(100))
+
+    # Stats
+    votes_count = Column(Integer, default=0)
+    speeches_count = Column(Integer, default=0)
+
+    # Publishing status
+    published = Column(Boolean, default=False)
+    published_at = Column(DateTime)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
 
 
 class DailyDigest(Base):

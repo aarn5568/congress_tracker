@@ -22,6 +22,7 @@ RUN mkdir -p /data /logs
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV DATABASE_URL=sqlite:////data/congress_tracker.db
+ENV PYTHONPATH=/app
 
 # Copy cron file to container
 COPY docker/crontab /etc/cron.d/congress-tracker

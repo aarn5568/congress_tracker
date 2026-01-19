@@ -8,8 +8,8 @@ import httpx
 import structlog
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from congress_tracker.config import get_config
-from congress_tracker.models.database import Bill, get_session, init_db
+from config import get_config
+from models.database import Bill, get_session, init_db
 
 log = structlog.get_logger()
 

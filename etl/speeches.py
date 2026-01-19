@@ -22,10 +22,23 @@ try:
 except ImportError:
     PDF_AVAILABLE = False
 
-from congress_tracker.config import get_config
-from congress_tracker.models.database import FloorSpeech, Chamber, get_session, init_db
+from config import get_config
+from models.database import FloorSpeech, Bill, Chamber, get_session, init_db
 
 log = structlog.get_logger()
+
+# Pattern to detect bill references in speech text
+# Matches: H.R. 2988, HR2988, H. R. 2988, S. 123, S.123, H.J.Res. 1, etc.
+BILL_PATTERN = re.compile(
+    r'\b(H\.?\s*R\.?|S\.?|H\.?\s*J\.?\s*Res\.?|S\.?\s*J\.?\s*Res\.?|'
+    r'H\.?\s*Con\.?\s*Res\.?|S\.?\s*Con\.?\s*Res\.?)\s*(\d+)\b',
+    re.IGNORECASE
+)
+
+# Common bill name patterns (for named bills like "Laken Riley Act")
+NAMED_BILL_KEYWORDS = [
+    "Act", "Resolution", "Bill", "Amendment"
+]
 
 # Pattern to identify speaker lines: "Mr./Mrs./Ms. NAME" or "The SPEAKER"
 SPEAKER_PATTERN = re.compile(
@@ -37,6 +50,57 @@ SPEAKER_PATTERN = re.compile(
 
 # Pattern for topic headers (all caps lines)
 TOPIC_PATTERN = re.compile(r'^([A-Z][A-Z\s\-,\.\']{10,})$', re.MULTILINE)
+
+
+def detect_bill_references(text: str, title: str = None) -> list[str]:
+    """Detect bill references in speech text and title.
+
+    Returns list of normalized bill IDs like ["HR2988", "S123"].
+    """
+    bill_refs = set()
+    search_text = f"{title or ''} {text}"
+
+    for match in BILL_PATTERN.finditer(search_text):
+        bill_type = match.group(1).upper().replace(".", "").replace(" ", "")
+        bill_num = match.group(2)
+
+        # Normalize bill type
+        type_map = {
+            "HR": "HR",
+            "S": "S",
+            "HJRES": "HJRES",
+            "SJRES": "SJRES",
+            "HCONRES": "HCONRES",
+            "SCONRES": "SCONRES",
+        }
+        normalized_type = type_map.get(bill_type, bill_type)
+        bill_refs.add(f"{normalized_type}{bill_num}")
+
+    return list(bill_refs)
+
+
+def lookup_bill_by_reference(bill_ref: str, session) -> Optional[Bill]:
+    """Look up a bill in the database by its string ID.
+
+    Args:
+        bill_ref: Bill reference like "HR2988"
+        session: Database session
+
+    Returns:
+        Bill object if found, None otherwise
+    """
+    # Parse the bill reference
+    match = re.match(r'([A-Z]+)(\d+)', bill_ref)
+    if not match:
+        return None
+
+    bill_type = match.group(1).lower()
+    bill_num = int(match.group(2))
+
+    return session.query(Bill).filter(
+        Bill.bill_type == bill_type,
+        Bill.bill_number == bill_num
+    ).first()
 
 
 class CongressionalRecordFetcher:
@@ -195,6 +259,15 @@ class CongressionalRecordFetcher:
 
     def _speech_dict_to_model(self, speech_data: dict) -> FloorSpeech:
         """Convert speech dict to FloorSpeech model."""
+        # Detect bill references in speech
+        bill_refs = detect_bill_references(
+            speech_data["content"],
+            speech_data.get("title")
+        )
+
+        # Use the first detected bill reference (most likely the main topic)
+        related_bill_id = bill_refs[0] if bill_refs else None
+
         return FloorSpeech(
             congress=119 if speech_data["speech_date"].year >= 2025 else 118,
             chamber=speech_data["chamber"],
@@ -203,6 +276,7 @@ class CongressionalRecordFetcher:
             speaker_state=speech_data.get("speaker_state"),
             title=speech_data.get("title"),
             content=speech_data["content"],
+            related_bill_id=related_bill_id,
         )
 
     def fetch_speeches_for_date(self, target_date: date) -> list[FloorSpeech]:
@@ -274,9 +348,19 @@ class CongressionalRecordFetcher:
                 ).first()
 
                 if not existing:
+                    # Try to link to actual bill record if we have a bill reference
+                    if speech.related_bill_id:
+                        bill = lookup_bill_by_reference(speech.related_bill_id, session)
+                        if bill:
+                            speech.related_bill_db_id = bill.id
+                            log.debug("Linked speech to bill",
+                                     speaker=speech.speaker_name,
+                                     bill=speech.related_bill_id)
+
                     session.add(speech)
                     saved_count += 1
-                    log.debug("Saved speech", speaker=speech.speaker_name)
+                    log.debug("Saved speech", speaker=speech.speaker_name,
+                             bill_ref=speech.related_bill_id)
 
             session.commit()
             log.info("Speeches saved", new_count=saved_count, total=len(speeches))

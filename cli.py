@@ -29,7 +29,7 @@ def cli():
 @cli.command()
 def init_db():
     """Initialize the database."""
-    from congress_tracker.models.database import init_db as _init_db
+    from models.database import init_db as _init_db
     _init_db()
     click.echo("Database initialized.")
 
@@ -39,7 +39,7 @@ def init_db():
               help="Date to fetch votes for (YYYY-MM-DD). Defaults to yesterday.")
 def fetch_votes(target_date):
     """Fetch Congressional votes for a specific date."""
-    from congress_tracker.etl.votes import fetch_votes_for_date
+    from etl.votes import fetch_votes_for_date
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -57,7 +57,7 @@ def fetch_votes(target_date):
 @click.option("--details", is_flag=True, help="Fetch full bill details (slower).")
 def fetch_bills(target_date, details):
     """Fetch Congressional bills updated on a specific date."""
-    from congress_tracker.etl.bills import fetch_bills_for_date
+    from etl.bills import fetch_bills_for_date
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -74,7 +74,7 @@ def fetch_bills(target_date, details):
               help="Date to fetch Congressional Record for (YYYY-MM-DD). Defaults to yesterday.")
 def fetch_speeches(target_date):
     """Fetch Congressional Record for a specific date."""
-    from congress_tracker.etl.speeches import fetch_speeches_for_date
+    from etl.speeches import fetch_speeches_for_date
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -95,9 +95,9 @@ def fetch_speeches(target_date):
 @click.option("--skip-speeches", is_flag=True, help="Skip speech extraction (faster).")
 def run_etl(target_date, skip_speeches):
     """Run full ETL pipeline: fetch votes, bills, and speeches."""
-    from congress_tracker.etl.votes import fetch_votes_for_date
-    from congress_tracker.etl.bills import fetch_bills_for_date
-    from congress_tracker.etl.speeches import fetch_speeches_for_date
+    from etl.votes import fetch_votes_for_date
+    from etl.bills import fetch_bills_for_date
+    from etl.speeches import fetch_speeches_for_date
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -132,7 +132,7 @@ def run_etl(target_date, skip_speeches):
               help="Date to generate digest for (YYYY-MM-DD). Defaults to yesterday.")
 def generate_digest(target_date):
     """Generate daily digest for Bluesky."""
-    from congress_tracker.formatters.bluesky import generate_daily_digest
+    from formatters.bluesky import generate_daily_digest
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -156,7 +156,7 @@ def generate_digest(target_date):
 @click.option("--dry-run", is_flag=True, help="Print thread without publishing.")
 def publish_digest(target_date, dry_run):
     """Publish daily digest to Bluesky."""
-    from congress_tracker.formatters.bluesky import generate_daily_digest, publish_thread
+    from formatters.bluesky import generate_daily_digest, publish_thread
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -189,8 +189,8 @@ def publish_digest(target_date, dry_run):
 @click.option("--max-items", "-m", type=int, help="Maximum number of items to post.")
 def publish_items(target_date, dry_run, max_items):
     """Publish individual posts for each bill, vote, and speech from a date."""
-    from congress_tracker.formatters.bluesky import publish_daily_items
-    from congress_tracker.models.database import get_session, Vote, Bill, FloorSpeech
+    from formatters.bluesky import publish_daily_items
+    from models.database import get_session, Vote, Bill, FloorSpeech
 
     if target_date is None:
         target = date.today() - timedelta(days=1)
@@ -236,27 +236,128 @@ def publish_items(target_date, dry_run, max_items):
         click.echo(f"  Votes: {stats['votes']}")
         click.echo(f"  Bills: {stats['bills']}")
         click.echo(f"  Speeches: {stats['speeches']}")
+        if stats.get('skipped'):
+            click.echo(f"  Skipped (no context): {stats['skipped']}")
         if stats['errors']:
             click.echo(f"  Errors: {stats['errors']}")
 
 
 @cli.command()
+@click.option("--date", "-d", "target_date", type=click.DateTime(formats=["%Y-%m-%d"]),
+              help="Date to publish bill threads for (YYYY-MM-DD). Defaults to yesterday.")
+@click.option("--dry-run", is_flag=True, help="Preview threads without publishing.")
+@click.option("--max-bills", "-m", type=int, help="Maximum number of bills to publish.")
+def publish_bill_threads(target_date, dry_run, max_bills):
+    """Publish bills as threaded posts with votes and speeches.
+
+    Each bill becomes a thread:
+    - Header: Bill summary and sponsor
+    - Replies: Vote results (passage, amendments)
+    - Replies: Floor speeches about the bill
+    """
+    from formatters.bluesky import publish_bill_threads as _publish_bill_threads
+    from models.database import get_session, Bill, Vote, FloorSpeech
+
+    if target_date is None:
+        target = date.today() - timedelta(days=1)
+    else:
+        target = target_date.date()
+
+    click.echo(f"{'[DRY RUN] ' if dry_run else ''}Publishing bill threads for {target}...")
+
+    if dry_run:
+        # Preview what would be posted
+        session = get_session()
+        try:
+            bills = session.query(Bill).filter(
+                Bill.latest_action_date == target,
+                Bill.posted.is_(False)
+            ).all()
+
+            if max_bills:
+                bills = bills[:max_bills]
+
+            if not bills:
+                click.echo("No unposted bills found.")
+                return
+
+            click.echo(f"\nWould publish {len(bills)} bill thread(s):\n")
+
+            for bill in bills:
+                bill_id = f"{bill.bill_type.upper()}{bill.bill_number}"
+
+                # Count related votes and speeches
+                votes = session.query(Vote).filter(Vote.bill_id == bill_id).all()
+                speeches = session.query(FloorSpeech).filter(
+                    FloorSpeech.related_bill_id == bill_id
+                ).all()
+
+                click.echo(f"{'─' * 50}")
+                click.echo(f"📜 {bill_id}: {bill.short_title or bill.title}")
+                click.echo(f"   Sponsor: {bill.sponsor_name or 'Unknown'}")
+                click.echo(f"   Votes: {len(votes)}")
+                click.echo(f"   Speeches: {len(speeches)}")
+
+                # Show thread structure preview
+                from formatters.bluesky import format_bill_header, format_vote_reply, format_speech_reply
+
+                click.echo(f"\n   Thread preview:")
+                click.echo(f"   [HEADER] {format_bill_header(bill)[:80]}...")
+
+                for vote in votes[:3]:
+                    click.echo(f"   └─ [VOTE] {format_vote_reply(vote)[:60]}...")
+
+                for speech in speeches[:2]:
+                    click.echo(f"   └─ [SPEECH] {format_speech_reply(speech)[:60]}...")
+
+                if len(votes) > 3:
+                    click.echo(f"   └─ ... and {len(votes) - 3} more votes")
+                if len(speeches) > 2:
+                    click.echo(f"   └─ ... and {len(speeches) - 2} more speeches")
+
+                click.echo()
+
+        finally:
+            session.close()
+    else:
+        stats = _publish_bill_threads(target, max_bills=max_bills, dry_run=False)
+        click.echo(f"\nPublished:")
+        click.echo(f"  Bill threads: {stats['bills']}")
+        click.echo(f"  Total votes included: {stats['total_votes']}")
+        click.echo(f"  Total speeches included: {stats['total_speeches']}")
+        if stats['errors']:
+            click.echo(f"  Errors: {stats['errors']}")
+
+        if stats['threads']:
+            click.echo(f"\nThreads:")
+            for thread in stats['threads']:
+                click.echo(f"  {thread['bill_id']}: {thread['total_posts']} posts")
+
+
+@cli.command()
 def show_stats():
     """Show database statistics."""
-    from congress_tracker.models.database import get_session, Vote, Bill, FloorSpeech, DailyDigest
+    from models.database import get_session, Vote, Bill, FloorSpeech, BillThread, DailyDigest
 
     session = get_session()
     try:
         vote_count = session.query(Vote).count()
         bill_count = session.query(Bill).count()
         speech_count = session.query(FloorSpeech).count()
+        thread_count = session.query(BillThread).count()
         digest_count = session.query(DailyDigest).count()
 
+        # Count items with bill references
+        linked_speeches = session.query(FloorSpeech).filter(
+            FloorSpeech.related_bill_id.isnot(None)
+        ).count()
+
         click.echo("Database Statistics:")
-        click.echo(f"  Votes:    {vote_count}")
-        click.echo(f"  Bills:    {bill_count}")
-        click.echo(f"  Speeches: {speech_count}")
-        click.echo(f"  Digests:  {digest_count}")
+        click.echo(f"  Votes:        {vote_count}")
+        click.echo(f"  Bills:        {bill_count}")
+        click.echo(f"  Speeches:     {speech_count} ({linked_speeches} linked to bills)")
+        click.echo(f"  Bill Threads: {thread_count}")
+        click.echo(f"  Digests:      {digest_count}")
     finally:
         session.close()
 
@@ -268,8 +369,8 @@ def show_stats():
 @click.option("--bills-only", is_flag=True, help="Only summarize bills.")
 def summarize(target_date, speeches_only, bills_only):
     """Generate AI summaries for speeches and bills using Claude Haiku."""
-    from congress_tracker.models.database import get_session, Bill, FloorSpeech
-    from congress_tracker.summarizers.haiku import get_summarizer
+    from models.database import get_session, Bill, FloorSpeech
+    from summarizers.haiku import get_summarizer
     from datetime import datetime
 
     if target_date is None:

@@ -1,9 +1,10 @@
 """Database models for Congress Tracker."""
 
-from congress_tracker.models.database import (
+from models.database import (
     Vote,
     Bill,
     FloorSpeech,
+    BillThread,
     DailyDigest,
     VoteResult,
     Chamber,
@@ -16,6 +17,7 @@ __all__ = [
     "Vote",
     "Bill",
     "FloorSpeech",
+    "BillThread",
     "DailyDigest",
     "VoteResult",
     "Chamber",

@@ -1,15 +1,15 @@
 #!/bin/bash
 set -e
 
+# Load environment variables from .env if it exists (before any Python commands)
+if [ -f /app/.env ]; then
+    export $(cat /app/.env | grep -v '^#' | xargs)
+fi
+
 # Initialize database on first run
 if [ ! -f /data/congress_tracker.db ]; then
     echo "Initializing database..."
-    python -m congress_tracker.cli init-db
-fi
-
-# Load environment variables from .env if it exists
-if [ -f /app/.env ]; then
-    export $(cat /app/.env | grep -v '^#' | xargs)
+    python cli.py init-db
 fi
 
 # Handle different commands
@@ -25,17 +25,17 @@ case "$1" in
 
     fetch)
         echo "Running one-time data fetch..."
-        python -m congress_tracker.cli run-etl "${@:2}"
+        python cli.py run-etl "${@:2}"
         ;;
 
     post)
         echo "Running one-time post..."
-        python -m congress_tracker.cli publish-items "${@:2}"
+        python cli.py publish-items "${@:2}"
         ;;
 
     cli)
         echo "Running CLI command..."
-        python -m congress_tracker.cli "${@:2}"
+        python cli.py "${@:2}"
         ;;
 
     bash)
