@@ -14,12 +14,38 @@ A Python tool that fetches Congressional activity (votes, bills) from Congress.g
 
 ## Requirements
 
-- Python 3.10+
+- Docker & Docker Compose (recommended) OR Python 3.10+
 - Congress.gov API key (free: https://api.congress.gov/)
 - Anthropic API key (for summarization, optional)
 - Bluesky account (for publishing, optional)
 
 ## Installation
+
+### Option 1: Docker (Recommended) 🐳
+
+**Easiest setup with automatic scheduling included!**
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/congress_tracker.git
+cd congress_tracker
+
+# Configure environment
+cp .env.example .env
+nano .env  # Add your API keys
+
+# Start scheduler
+docker-compose up -d scheduler
+
+# View logs
+docker-compose logs -f scheduler
+```
+
+**Done!** The scheduler is now running and will automatically fetch and post throughout the day.
+
+See [DOCKER.md](DOCKER.md) for complete Docker documentation.
+
+### Option 2: Native Python Installation
 
 ```bash
 # Clone the repository
@@ -89,7 +115,55 @@ python -m congress_tracker.cli publish-items --date 2025-09-08 --dry-run
 python -m congress_tracker.cli show-stats
 ```
 
+### Docker Quick Reference
+
+If using Docker, prefix commands with `docker-compose run --rm cli`:
+
+```bash
+# Fetch data
+docker-compose run --rm cli run-etl
+
+# Post items
+docker-compose run --rm cli publish-items --dry-run
+
+# Show stats
+docker-compose run --rm cli show-stats
+
+# Or use the helper script
+./docker/docker-helper.sh fetch
+./docker/docker-helper.sh post --dry-run
+./docker/docker-helper.sh stats
+```
+
+See [DOCKER.md](DOCKER.md) for complete Docker usage.
+
 ## Automated Scheduling
+
+### Docker: Automatic (Easiest)
+
+If using Docker, scheduling is **built-in and automatic**:
+
+```bash
+# Start scheduler (runs in background)
+docker-compose up -d scheduler
+
+# View logs to verify
+docker-compose logs -f scheduler
+```
+
+The scheduler automatically:
+- Fetches data at 10:30 AM ET
+- Posts in 5 batches from 11 AM - 7 PM ET
+- Handles timezone conversion
+- Restarts on system reboot (with `restart: unless-stopped`)
+
+See [DOCKER.md](DOCKER.md) to customize the schedule.
+
+---
+
+### Native Installation Options
+
+For non-Docker installations, choose one of these scheduling approaches:
 
 ### Option 1: Optimal Staggered Schedule (Recommended)
 

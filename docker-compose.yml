@@ -1,0 +1,41 @@
+version: '3.8'
+
+services:
+  # Main scheduler service - runs cron jobs automatically
+  scheduler:
+    build: .
+    container_name: congress-tracker-scheduler
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - TZ=America/New_York  # Set timezone for cron jobs
+      - DATABASE_URL=sqlite:////data/congress_tracker.db
+    volumes:
+      - ./data:/data           # Persistent database storage
+      - ./logs:/logs           # Log files
+      - ./.env:/app/.env:ro    # Read-only .env file
+    command: cron
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: One-shot service for manual commands
+  # Use: docker-compose run --rm cli <command>
+  cli:
+    build: .
+    container_name: congress-tracker-cli
+    env_file:
+      - .env
+    environment:
+      - TZ=America/New_York
+      - DATABASE_URL=sqlite:////data/congress_tracker.db
+    volumes:
+      - ./data:/data
+      - ./logs:/logs
+      - ./.env:/app/.env:ro
+    profiles:
+      - manual  # Don't start automatically
+    entrypoint: ["/entrypoint.sh", "cli"]
