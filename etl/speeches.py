@@ -41,11 +41,12 @@ NAMED_BILL_KEYWORDS = [
 ]
 
 # Pattern to identify speaker lines: "Mr./Mrs./Ms. NAME" or "The SPEAKER"
+# Congressional Record uses ALL CAPS for speaker names (e.g., "Mr. SCHUMER")
+# Allow paragraph breaks between title and name due to PDF extraction
 SPEAKER_PATTERN = re.compile(
-    r'^(Mr\.|Mrs\.|Ms\.|Miss|The\s+SPEAKER|The\s+PRESIDING\s+OFFICER|'
-    r'The\s+ACTING\s+PRESIDENT|The\s+VICE\s+PRESIDENT)\s*'
-    r'([A-Z][A-Z\s\-\']+)?(?:\s+of\s+([A-Za-z]+))?[.\s]',
-    re.MULTILINE
+    r'(Mr\.|Mrs\.|Ms\.|Miss|The\s+SPEAKER|The\s+PRESIDING\s+OFFICER|'
+    r'The\s+ACTING\s+PRESIDENT|The\s+VICE\s+PRESIDENT)\s*(?:\n\n)?'
+    r'([A-Z]{2,}(?:\s+[A-Z]+)*)(?:\s+\(([A-Za-z]+)\))?(?:\s+of\s+([A-Za-z]+))?[.\s]'
 )
 
 # Pattern for topic headers (all caps lines)
@@ -205,7 +206,31 @@ class CongressionalRecordFetcher:
                 text_parts.append(page.get_text())
 
             doc.close()
-            return "\n".join(text_parts)
+            raw_text = "\n".join(text_parts)
+
+            # Clean up PDF artifacts - normalize whitespace
+            import re
+
+            # Remove hyphenation at line breaks (e.g., "INVEST-\nMENT" -> "INVESTMENT")
+            cleaned = re.sub(r'-\s*\n\s*', '', raw_text)
+
+            # Join lines that are part of the same sentence/word
+            # (PDF often breaks mid-word or mid-sentence)
+            cleaned = re.sub(r'(\w)\s*\n\s*(\w)', r'\1 \2', cleaned)
+
+            # Collapse multiple whitespace to single space
+            cleaned = re.sub(r'[ \t]+', ' ', cleaned)
+
+            # Normalize multiple newlines to double newline (paragraph break)
+            cleaned = re.sub(r'\n\s*\n', '\n\n', cleaned)
+
+            # Clean up any remaining single newlines
+            cleaned = re.sub(r'\n', ' ', cleaned)
+
+            # Re-add paragraph breaks
+            cleaned = re.sub(r'  +', '\n\n', cleaned)
+
+            return cleaned.strip()
         except Exception as e:
             log.error("Failed to extract PDF text", error=str(e))
             return ""
@@ -226,9 +251,17 @@ class CongressionalRecordFetcher:
 
         for i, match in enumerate(speaker_matches):
             # Get the speaker info
-            title = match.group(1)
+            # Groups: 1=title, 2=name, 3=paren state like (Texas), 4=state from "of State"
+            title = match.group(1) or ""
             name = match.group(2) or ""
-            state = match.group(3) or ""
+            paren_state = match.group(3) or ""
+            of_state = match.group(4) or ""
+            state = paren_state or of_state
+
+            # Clean up whitespace artifacts from PDF extraction
+            title = " ".join(title.split())
+            name = " ".join(name.split())
+            state = " ".join(state.split())
 
             speaker_name = f"{title} {name}".strip()
             if state:
@@ -248,7 +281,8 @@ class CongressionalRecordFetcher:
             topic = None
             topic_match = TOPIC_PATTERN.search(text[max(0, match.start() - 200):match.start()])
             if topic_match:
-                topic = topic_match.group(1).strip()
+                # Clean up the topic - remove newlines, normalize whitespace
+                topic = " ".join(topic_match.group(1).split()).strip()
 
             speeches.append({
                 "speaker_name": speaker_name,
