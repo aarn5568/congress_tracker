@@ -1,19 +1,23 @@
 # Congress Tracker - Docker Cron Schedule
 # Times are in the timezone set by TZ environment variable (America/New_York)
 
+# Set PATH to include Python location
+PATH=/usr/local/bin:/usr/local/sbin:/usr/bin:/usr/sbin:/bin:/sbin
+PYTHONPATH=/app
+
 # 10:30 AM - Fetch daily data (votes, bills, speeches)
-30 10 * * * cd /app && python cli.py run-etl >> /logs/fetch.log 2>&1
+30 10 * * * . /etc/environment; cd /app && python cli.py run-etl >> /logs/fetch.log 2>&1
 
 # 11:00 AM - Generate AI summaries for speeches and bills
-0 11 * * * cd /app && python cli.py summarize >> /logs/summarize.log 2>&1
+0 11 * * * . /etc/environment; cd /app && python cli.py summarize >> /logs/summarize.log 2>&1
 
 # 12:00 PM - Publish bill threads (bills with votes and speeches as threaded replies)
-0 12 * * * cd /app && python cli.py publish-bill-threads --max-bills 10 >> /logs/post_threads.log 2>&1
+0 12 * * * . /etc/environment; cd /app && python cli.py publish-bill-threads --max-bills 10 >> /logs/post_threads.log 2>&1
 
 # 3:00 PM - Publish more bill threads
-0 15 * * * cd /app && python cli.py publish-bill-threads --max-bills 10 >> /logs/post_threads.log 2>&1
+0 15 * * * . /etc/environment; cd /app && python cli.py publish-bill-threads --max-bills 10 >> /logs/post_threads.log 2>&1
 
 # 6:00 PM - Final batch of bill threads
-0 18 * * * cd /app && python cli.py publish-bill-threads --max-bills 10 >> /logs/post_threads.log 2>&1
+0 18 * * * . /etc/environment; cd /app && python cli.py publish-bill-threads --max-bills 10 >> /logs/post_threads.log 2>&1
 
 # Empty line required at end of cron file

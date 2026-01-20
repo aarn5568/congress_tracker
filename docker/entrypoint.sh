@@ -16,6 +16,18 @@ fi
 case "$1" in
     cron)
         echo "Starting cron scheduler..."
+
+        # Export environment variables to cron
+        # This writes env vars to a file that cron jobs can source
+        printenv | grep -E "^(CONGRESS_API_KEY|ANTHROPIC_API_KEY|BLUESKY_HANDLE|BLUESKY_PASSWORD|DISCORD_WEBHOOK_URL|DATABASE_URL|TZ|PYTHONPATH)=" > /etc/environment
+
+        # Also set TZ system-wide for cron
+        if [ -n "$TZ" ]; then
+            echo "TZ=$TZ" >> /etc/environment
+            ln -snf /usr/share/zoneinfo/$TZ /etc/localtime
+            echo "$TZ" > /etc/timezone
+        fi
+
         echo "Timezone: $(date +%Z)"
         echo "Current time: $(date)"
 
