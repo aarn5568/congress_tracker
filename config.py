@@ -36,7 +36,7 @@ class Config(BaseModel):
     congress_api_base: str = "https://api.congress.gov/v3"
 
     # Summarization settings
-    haiku_model: str = "claude-3-5-haiku-20241022"
+    haiku_model: str = "claude-3-haiku-20240307"
     max_summary_tokens: int = 150
 
     # Bluesky thread settings
